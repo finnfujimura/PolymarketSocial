@@ -72,22 +72,20 @@ async function fetchUserActivities(polymarketUserAddress: string): Promise<Polym
   }
 }
 
-// Format a trade/redeem message with deep-link
+// Format a trade/redeem message with rich HTML and deep-link
 function formatMessage(activity: PolymarketActivity, username: string): string {
-  const emoji = activity.type === 'TRADE' 
-    ? (activity.side === 'BUY' ? '📈' : '📉')
-    : '💰';
+  // Set color based on BUY (green) or SELL (red)
+  const color = activity.side === 'BUY' ? '#4ade80' : '#f87171';
   
-  const action = activity.type === 'TRADE'
-    ? `${activity.side.toLowerCase()}s`
-    : 'redeems';
-
-  const amount = `$${activity.usdcSize.toFixed(2)}`;
-  const pricePercent = `${(activity.price * 100).toFixed(0)}¢`;
-  
-  const link = `<a href="https://polymarket.com/event/${activity.slug}" target="_blank" class="text-blue-600 dark:text-blue-400 underline">${activity.title}</a>`;
-
-  return `${emoji} <strong>${username}</strong> ${action} ${amount} on ${activity.outcome} at ${pricePercent} in ${link}`;
+  // Construct rich HTML message
+  return `<p>
+  🤖 <strong>${username}</strong> just
+  <span style="color: ${color}; font-weight: bold;">${activity.side}</span>
+  <strong>$${activity.usdcSize.toFixed(2)}</strong> of "${activity.outcome}" in
+  <a href="https://polymarket.com/event/${activity.slug}" target="_blank" style="color: #60a5fa; text-decoration: underline;">
+    ${activity.title}
+  </a>
+</p>`;
 }
 
 // Process activities for a single user
@@ -200,7 +198,7 @@ async function processUser(user: any) {
       // Trigger retention (non-blocking, fire and forget)
       supabase.rpc('delete_old_messages', { squad_id: squadId });
 
-      // Broadcast via Socket.IO using bot:broadcast event
+      // Broadcast via Socket.IO to the squad room
       if (socket && socket.connected) {
         const chatMessage = {
           id: message.id.toString(),
@@ -215,7 +213,11 @@ async function processUser(user: any) {
           timestamp: message.timestamp,
         };
 
-        socket.emit('bot:broadcast', chatMessage);
+        // Emit directly to squad room - server will handle the broadcast
+        socket.emit('bot:broadcast', {
+          squadId: squadId.toString(),
+          message: chatMessage,
+        });
         console.log(`🤖 Posted bot message to squad ${squadId}: ${activity.type} by ${username}`);
       }
     }

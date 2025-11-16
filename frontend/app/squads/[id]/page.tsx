@@ -45,7 +45,6 @@ export default function SquadChatPage() {
   const [leaderboard, setLeaderboard] = useState<any[]>([])
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(false)
   const [showLeaderboard, setShowLeaderboard] = useState(false)
-  const [leaderboardTab, setLeaderboardTab] = useState<'all' | 'weekly' | 'daily'>('all')
   
   const socketRef = useRef<Socket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -142,12 +141,12 @@ export default function SquadChatPage() {
     setSending(false)
   }
 
-  const loadLeaderboard = async (timeframe: 'all' | 'weekly' | 'daily' = leaderboardTab) => {
+  const loadLeaderboard = async () => {
     if (!token) return
     
     setLoadingLeaderboard(true)
     try {
-      const data = await api.getLeaderboard(token, squadId, timeframe)
+      const data = await api.getLeaderboard(token, squadId)
       setLeaderboard(data.leaderboard)
       setShowLeaderboard(true)
     } catch (err) {
@@ -156,11 +155,6 @@ export default function SquadChatPage() {
     } finally {
       setLoadingLeaderboard(false)
     }
-  }
-
-  const handleTabChange = async (tab: 'all' | 'weekly' | 'daily') => {
-    setLeaderboardTab(tab)
-    await loadLeaderboard(tab)
   }
 
   const handleCalculateWinner = async () => {
@@ -340,40 +334,6 @@ export default function SquadChatPage() {
                 ✕
               </button>
             </div>
-
-            {/* Tabs */}
-            <div className="flex gap-2 mb-4 border-b border-gray-200 dark:border-gray-700">
-              <button
-                onClick={() => handleTabChange('all')}
-                className={`px-4 py-2 font-medium transition-colors ${
-                  leaderboardTab === 'all'
-                    ? 'text-purple-600 border-b-2 border-purple-600'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-purple-600'
-                }`}
-              >
-                All Time
-              </button>
-              <button
-                onClick={() => handleTabChange('weekly')}
-                className={`px-4 py-2 font-medium transition-colors ${
-                  leaderboardTab === 'weekly'
-                    ? 'text-purple-600 border-b-2 border-purple-600'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-purple-600'
-                }`}
-              >
-                Weekly
-              </button>
-              <button
-                onClick={() => handleTabChange('daily')}
-                className={`px-4 py-2 font-medium transition-colors ${
-                  leaderboardTab === 'daily'
-                    ? 'text-purple-600 border-b-2 border-purple-600'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-purple-600'
-                }`}
-              >
-                Daily
-              </button>
-            </div>
             
             <div className="space-y-2 mb-4">
               {leaderboard.map((entry, index) => (
@@ -395,6 +355,11 @@ export default function SquadChatPage() {
                   />
                   <div className="flex-1">
                     <p className="font-medium">{entry.username}</p>
+                    {entry.topPosition && (
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                        🔥 Best: {entry.topPosition.outcome} in {entry.topPosition.title.substring(0, 30)}{entry.topPosition.title.length > 30 ? '...' : ''} (+${entry.topPosition.cashPnl})
+                      </p>
+                    )}
                   </div>
                   <div className={`font-bold text-lg ${
                     entry.totalLivePnl > 0
@@ -409,33 +374,20 @@ export default function SquadChatPage() {
               ))}
             </div>
 
-            <div className="flex flex-col gap-2">
-              {/* Only show winner button on weekly tab */}
-              {leaderboardTab === 'weekly' && (
-                <button
-                  onClick={handleCalculateWinner}
-                  disabled={loadingLeaderboard}
-                  className="w-full px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 font-semibold"
-                >
-                  🏆 Calculate Weekly Winner
-                </button>
-              )}
-              
-              <div className="flex gap-2">
-                <button
-                  onClick={() => loadLeaderboard()}
-                  disabled={loadingLeaderboard}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {loadingLeaderboard ? 'Refreshing...' : '🔄 Refresh'}
-                </button>
-                <button
-                  onClick={() => setShowLeaderboard(false)}
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
-                >
-                  Close
-                </button>
-              </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => loadLeaderboard()}
+                disabled={loadingLeaderboard}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {loadingLeaderboard ? 'Refreshing...' : '🔄 Refresh'}
+              </button>
+              <button
+                onClick={() => setShowLeaderboard(false)}
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

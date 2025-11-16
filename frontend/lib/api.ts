@@ -115,8 +115,8 @@ export const api = {
     return response.json();
   },
 
-  async getLeaderboard(token: string, squadId: string, timeframe: 'all' | 'weekly' | 'daily' = 'all') {
-    const response = await fetch(`${API_BASE_URL}/api/squads/${squadId}/leaderboard?timeframe=${timeframe}`, {
+  async getLeaderboard(token: string, squadId: string) {
+    const response = await fetch(`${API_BASE_URL}/api/squads/${squadId}/leaderboard`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 

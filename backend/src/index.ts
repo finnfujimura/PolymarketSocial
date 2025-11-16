@@ -116,35 +116,10 @@ io.on('connection', (socket) => {
 
       const { squadId, message } = data;
       
-      // Save bot message to database
-      const { data: savedMessage, error: saveError } = await supabase
-        .from('chat_messages')
-        .insert({
-          squadId: parseInt(squadId),
-          authorAddress: null, // Bot has no author
-          content: message,
-          isBot: true,
-        })
-        .select()
-        .single();
-
-      if (saveError || !savedMessage) {
-        console.error('Failed to save bot message:', saveError);
-        return;
-      }
-
-      // Broadcast formatted message to squad room
-      const chatMessage = {
-        id: savedMessage.id.toString(),
-        squadId: squadId,
-        author: null, // Bot has no author
-        content: savedMessage.content,
-        isBot: true,
-        timestamp: savedMessage.timestamp,
-      };
-
-      io.to(`squad:${squadId}`).emit('chat:receive', chatMessage);
-      console.log(`🤖 Bot broadcast to squad ${squadId}: ${message.substring(0, 50)}...`);
+      // The bot has already saved the message to the database,
+      // so we just need to broadcast it to the squad room
+      io.to(`squad:${squadId}`).emit('chat:receive', message);
+      console.log(`🤖 Bot broadcast to squad ${squadId}`);
     } catch (error) {
       console.error('Bot broadcast error:', error);
     }

@@ -332,7 +332,6 @@ router.get('/:id/leaderboard', authMiddleware, async (req: AuthRequest, res) => 
   try {
     const squadId = parseInt(req.params.id);
     const userId = req.userId!;
-    const timeframe = req.query.timeframe as string || 'all'; // all, weekly, daily
 
     if (isNaN(squadId)) {
       return res.status(400).json({ message: 'Invalid squad ID' });
@@ -351,7 +350,7 @@ router.get('/:id/leaderboard', authMiddleware, async (req: AuthRequest, res) => 
     }
 
     // Check cache first
-    const cacheKey = `leaderboard:${squadId}:${timeframe}`;
+    const cacheKey = `leaderboard:${squadId}`;
     const cached = pnlCache.get(cacheKey);
     if (cached) {
       return res.json(cached);
@@ -381,21 +380,7 @@ router.get('/:id/leaderboard', authMiddleware, async (req: AuthRequest, res) => 
 
     const POLYMARKET_API_KEY = process.env.POLYMARKET_ADMIN_API_KEY;
 
-    // Calculate time filter based on timeframe
-    // Note: For daily/weekly, we show realized PnL from closed positions + current open position value
-    // This gives a sense of "performance during this period" even if positions aren't closed yet
-    let startTimestamp: number | null = null;
-    if (timeframe === 'weekly') {
-      const weekAgo = new Date();
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      startTimestamp = Math.floor(weekAgo.getTime() / 1000);
-    } else if (timeframe === 'daily') {
-      const dayAgo = new Date();
-      dayAgo.setDate(dayAgo.getDate() - 1);
-      startTimestamp = Math.floor(dayAgo.getTime() / 1000);
-    }
-
-    // Fetch PnL for each member
+    // Fetch PnL for each member (all-time only)
     const leaderboard = await Promise.all(
       users.map(async (user: any) => {
         
@@ -406,71 +391,68 @@ router.get('/:id/leaderboard', authMiddleware, async (req: AuthRequest, res) => 
             username: user.username || 'Anonymous',
             avatarUrl: user.avatarUrl || `https://api.dicebear.com/9.x/pixel-art/svg?seed=${user.evmAddress}`,
             totalLivePnl: 0,
+            topPosition: null,
           };
         }
 
         try {
-          // Build URL with optional start time filter
-          const closedUrl = startTimestamp
-            ? `https://data-api.polymarket.com/closed-positions?user=${user.polymarketUserAddress}&limit=50&sortBy=REALIZEDPNL&start=${startTimestamp}`
-            : `https://data-api.polymarket.com/closed-positions?user=${user.polymarketUserAddress}&limit=50&sortBy=REALIZEDPNL`;
-
-          // Fetch closed positions and open positions value in parallel
-          const [closedResponse, valueResponse] = await Promise.all([
-            fetch(closedUrl, {
-              headers: { Authorization: `Bearer ${POLYMARKET_API_KEY}` },
-            }),
+          // Fetch closed positions, open positions, and value in parallel
+          const [closedResponse, openResponse, valueResponse] = await Promise.all([
+            fetch(
+              `https://data-api.polymarket.com/closed-positions?user=${user.polymarketUserAddress}&limit=50&sortBy=REALIZEDPNL`,
+              { headers: { Authorization: `Bearer ${POLYMARKET_API_KEY}` } }
+            ),
+            fetch(
+              `https://data-api.polymarket.com/positions?user=${user.polymarketUserAddress}`,
+              { headers: { Authorization: `Bearer ${POLYMARKET_API_KEY}` } }
+            ),
             fetch(
               `https://data-api.polymarket.com/value?user=${user.polymarketUserAddress}`,
-              {
-                headers: {
-                  Authorization: `Bearer ${POLYMARKET_API_KEY}`,
-                },
-              }
+              { headers: { Authorization: `Bearer ${POLYMARKET_API_KEY}` } }
             ),
           ]);
 
-          if (!closedResponse.ok || !valueResponse.ok) {
-            console.error(`Failed to fetch data for ${user.username}: closed=${closedResponse.status}, value=${valueResponse.status}`);
+          if (!closedResponse.ok || !openResponse.ok || !valueResponse.ok) {
+            console.error(`Failed to fetch data for ${user.username}: closed=${closedResponse.status}, open=${openResponse.status}, value=${valueResponse.status}`);
             return {
               evmAddress: user.evmAddress,
               username: user.username || 'Anonymous',
               avatarUrl: user.avatarUrl || `https://api.dicebear.com/9.x/pixel-art/svg?seed=${user.evmAddress}`,
               totalLivePnl: 0,
+              topPosition: null,
             };
           }
 
           const closedPositions = await closedResponse.json();
+          const openPositions = await openResponse.json();
           const valueData: any = await valueResponse.json();
 
-          // Filter closed positions by time if needed
-          let filteredClosedPositions = closedPositions;
-          if (startTimestamp && Array.isArray(closedPositions)) {
-            filteredClosedPositions = closedPositions.filter((pos: any) => {
-              // The timestamp field appears to be in seconds already (not milliseconds)
-              const timestamp = pos.timestamp;
-              if (!timestamp) return false;
-              
-              // Timestamp is already in seconds, just compare directly
-              return timestamp >= startTimestamp;
-            });
-            
-            console.log(`Timeframe: ${timeframe}, Total positions: ${closedPositions.length}, Filtered: ${Array.isArray(filteredClosedPositions) ? filteredClosedPositions.length : 0}, StartTime: ${startTimestamp}`);
-          }
-
-          // Sum up realizedPnl from filtered closed positions
-          const realizedPnl = Array.isArray(filteredClosedPositions)
-            ? filteredClosedPositions.reduce((sum: number, pos: any) => sum + (pos.realizedPnl || 0), 0)
+          // Sum up realizedPnl from all closed positions
+          const realizedPnl = Array.isArray(closedPositions)
+            ? closedPositions.reduce((sum: number, pos: any) => sum + (pos.realizedPnl || 0), 0)
             : 0;
 
-          // For "all time", include open positions value. For daily/weekly, only show realized PnL
-          const openPositionsValue = timeframe === 'all' ? (valueData?.value || 0) : 0;
+          // Add unrealized PnL from open positions
+          const openPositionsValue = valueData?.value || 0;
 
-          // Total PnL = realized (from closed positions) + unrealized (from open positions, all-time only)
+          // Total PnL = realized + unrealized
           const totalLivePnl = realizedPnl + openPositionsValue;
-          
-          if (timeframe !== 'all') {
-            console.log(`User ${user.username}: realizedPnl=${realizedPnl}, total=${totalLivePnl}`);
+
+          // Find top position (highest cashPnl from open positions)
+          let topPosition = null;
+          if (Array.isArray(openPositions) && openPositions.length > 0) {
+            const sortedPositions = openPositions
+              .filter((pos: any) => pos.cashPnl && pos.cashPnl > 0)
+              .sort((a: any, b: any) => (b.cashPnl || 0) - (a.cashPnl || 0));
+            
+            if (sortedPositions.length > 0) {
+              const best = sortedPositions[0];
+              topPosition = {
+                title: best.title || 'Unknown Market',
+                cashPnl: parseFloat((best.cashPnl || 0).toFixed(2)),
+                outcome: best.outcome || 'Unknown',
+              };
+            }
           }
 
           return {
@@ -478,6 +460,7 @@ router.get('/:id/leaderboard', authMiddleware, async (req: AuthRequest, res) => 
             username: user.username || 'Anonymous',
             avatarUrl: user.avatarUrl || `https://api.dicebear.com/9.x/pixel-art/svg?seed=${user.evmAddress}`,
             totalLivePnl: parseFloat(totalLivePnl.toFixed(2)),
+            topPosition,
           };
         } catch (error) {
           console.error(`Error fetching PnL for ${user.username}:`, error);
@@ -486,6 +469,7 @@ router.get('/:id/leaderboard', authMiddleware, async (req: AuthRequest, res) => 
             username: user.username || 'Anonymous',
             avatarUrl: user.avatarUrl || `https://api.dicebear.com/9.x/pixel-art/svg?seed=${user.evmAddress}`,
             totalLivePnl: 0,
+            topPosition: null,
           };
         }
       })
