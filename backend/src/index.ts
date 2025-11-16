@@ -106,7 +106,7 @@ io.on('connection', (socket) => {
   });
 
   // Handle bot broadcasts (bypass membership check for bot user)
-  socket.on('bot:broadcast', (message: any) => {
+  socket.on('bot:broadcast', async (data: any) => {
     try {
       // Only allow bot user to use this
       if (userId !== '0xBOT0000000000000000000000000000000000000') {
@@ -114,9 +114,37 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const { squadId } = message;
-      io.to(`squad:${squadId}`).emit('chat:receive', message);
-      console.log(`🤖 Bot broadcast to squad ${squadId}`);
+      const { squadId, message } = data;
+      
+      // Save bot message to database
+      const { data: savedMessage, error: saveError } = await supabase
+        .from('chat_messages')
+        .insert({
+          squadId: parseInt(squadId),
+          authorAddress: null, // Bot has no author
+          content: message,
+          isBot: true,
+        })
+        .select()
+        .single();
+
+      if (saveError || !savedMessage) {
+        console.error('Failed to save bot message:', saveError);
+        return;
+      }
+
+      // Broadcast formatted message to squad room
+      const chatMessage = {
+        id: savedMessage.id.toString(),
+        squadId: squadId,
+        author: null, // Bot has no author
+        content: savedMessage.content,
+        isBot: true,
+        timestamp: savedMessage.timestamp,
+      };
+
+      io.to(`squad:${squadId}`).emit('chat:receive', chatMessage);
+      console.log(`🤖 Bot broadcast to squad ${squadId}: ${message.substring(0, 50)}...`);
     } catch (error) {
       console.error('Bot broadcast error:', error);
     }
